@@ -1,0 +1,31 @@
+# dev environment / build artifacts
+node_modules/
+build/
+.turbo/
+.svelte-kit/
+stats.html
+vite.config.ts.timestamp*
+
+# private
+.env
+.env.*
+
+# OS file system configs
+desktop.ini
+.DS_Store
+
+# for development, only need to version control images that are uploaded during testing
+
+# files originally uploaded during donation
+static/datasets
+!static/datasets/**/*.gif
+!static/datasets/**/*.png
+!static/datasets/**/*.jpg
+!static/datasets/**/*.jpeg
+
+# original files that have been processed to be served publicly, i.e. zipped
+static/static
+!static/static/**/*.gif
+!static/static/**/*.png
+!static/static/**/*.jpg
+!static/static/**/*.jpeg
