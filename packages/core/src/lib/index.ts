@@ -99,3 +99,23 @@ export function createForm<T, TPath = Paths<T>>(options?: CreateFormOptions<T>) 
 
   return { data, errors, field, error }
 }
+
+let y = {}
+
+let x = new Proxy(() => {}, {
+    get: (target, prop) => {
+      return s(y, prop)
+    },
+})
+
+const s = (prev, key) => {
+  return new Proxy(() => {}, {
+    get: (_target, prop) => {
+      prev[key] ??= {}
+      return s(prev[key], prop)
+    },
+    apply(_target, _thisArg, argArray) {
+      prev[key] = argArray[0]
+    },
+  })
+}
