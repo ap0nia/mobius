@@ -1,18 +1,6 @@
-import type { z } from 'zod'
-import { writable } from 'svelte/store'
-import { deepSet } from '$lib/deepSet'
-import { deepFind } from './deepFind'
 
-type Paths<T, TPath extends string = ''> = {
-  [k in keyof T]: 
-    T[k] extends Record<string, unknown> 
-      ? Paths<T[k], `${TPath}${Extract<k, string>}.`> 
-      : T[k] extends Array<infer ArrayType> 
-      ? ArrayType extends Record<string, unknown> 
-        ? Paths<ArrayType, `${TPath}${Extract<k, string>}.${number}.`> 
-        : `${TPath}${Extract<k, string>}.${number}` 
-      : `${TPath}${Extract<k, string>}`
-}[keyof T]
+import { get, writable } from 'svelte/store'
+import type { z } from 'zod'
 
 type InputEvent = Event & { currentTarget: EventTarget & HTMLInputElement }
 
@@ -22,62 +10,68 @@ type CreateFormOptions<T> = {
 }
 
 type FieldError = {
+  path: (string | number)[]
   message: string
 }
 
-type FormError<T> = {
-  [k in keyof T]?: 
-    FieldError &
-    (T[k] extends Record<string, unknown> ? FormError<T[k]> : object) &
-    (T[k] extends Array<unknown> ? FieldError[] : object)
-}
-
-export function createForm<T, TPath = Paths<T>>(options?: CreateFormOptions<T>) {
+export function createForm<T>(options?: CreateFormOptions<T>) {
   const data = writable<T>(options?.initialData)
-  const errors = writable<FormError<T>>({})
-
-  const parse = <T>(input: unknown, schema: z.ZodSchema<T>) => {
-    const result = schema.safeParse(input)
-    return result
-  }
+  const errors = writable<FieldError[]>([])
+  const dirty = writable<Record<string, boolean>>({})
 
   /**
    * Svelte action to register a field.
    */
-  const field = (node: HTMLElement, name: Extract<TPath, string>) => {
+  const field = (node: HTMLElement, proxyCallback: (t: T) => any) => {
+    const inputNode = node as HTMLInputElement
+
     const handleChange = (event: Event) => {
-      data.update(current => {
+      const e = event as InputEvent
 
-        const newData = deepSet(current, name, (event as InputEvent).currentTarget.value)
-        if (options?.schema == null) return newData
+      /**
+       * Mutate this data to update the current data.
+       */
+      const newData = (get(data) ?? {}) as T
 
-        const result = parse<T>(newData, options.schema)
-        if (result.success) {
-          errors.update(e => {
-            deepSet(e, name, undefined)
-            return e
-          })
-          return result.data
-        }
+      /**
+       * Create a draft proxy around the original object.
+       */
+      const draft = createDraftProxy(newData)
 
-        errors.update(e => {
-          result.error.errors
-          .filter(schemaError => name.startsWith(schemaError.path.join('.')))
-          .forEach((schemaError) => {
-            deepSet(e, schemaError.path.join('.'), schemaError.message)
-          })
-          return e
-        })
+      /**
+       * The callback actually indexes the draft object; 
+       * invoking the function at that property will set the value in the original object.
+       */
+      const keys = proxyCallback(draft)(e.currentTarget.value)
 
-        return current
-      })
+      dirty.update(current => ({ ...current, [keys.join('.')]: true }))
+
+      if (!options?.schema) {
+        return data.set(newData)
+      }
+
+      const parseResult = options.schema.safeParse(newData)
+
+      if (parseResult.success) {
+        return data.set(parseResult.data)
+      } 
+      else {
+        errors.set(parseResult.error.errors.filter((e) => {
+          return Object.keys(dirty).includes(e.path.join('.'))
+        }))
+      }
     }
 
-    node.addEventListener('change', handleChange)
+    if (inputNode.type === 'text') {
+      node.addEventListener('input', handleChange)
+    } else {
+      node.addEventListener('change', handleChange)
+    }
 
     return {
       destroy() {
         node.removeEventListener('change', handleChange)
+        node.removeEventListener('input', handleChange)
       }
     }
   }
@@ -85,37 +79,42 @@ export function createForm<T, TPath = Paths<T>>(options?: CreateFormOptions<T>) 
   /**
    * Svelte action to register an error.
    */
-  const error = (node: HTMLElement, name: Extract<TPath, string>) => {
-    errors.subscribe(e => {
-      const foundError = deepFind(e, name)
-      if (foundError.penultimate == null) {
-        node.innerHTML = ''
-      } else {
-        console.log(foundError.penultimate)
-        node.innerHTML = foundError.penultimate[foundError.lastKey]
-      }
+  const error = (node: HTMLElement, name: (t: T) => any) => {
+    errors.subscribe(current => {
+      const newErrors: any = current
+      const draft = createDraftProxy(newErrors)
+      const keys = name(draft)()
+      const matchingErrors = current.filter(error => error.path.join('.').includes(keys.join('.')))
+      node.innerHTML = matchingErrors.map(error => error.message).join('')
     })
   }
 
   return { data, errors, field, error }
 }
 
-let y = {}
+const noop = () => {}
 
-let x = new Proxy(() => {}, {
-    get: (target, prop) => {
-      return s(y, prop)
-    },
-})
+function createDraftProxy<T>(y: T) {
+  const draftProxy = new Proxy(noop, {
+      get: (_target, prop) => {
+        return createInnerProxy(y, [prop])
+      },
+  }) as T
+  return draftProxy
+}
 
-const s = (prev, key) => {
+function createInnerProxy(prev: any, keys: (string | symbol)[]): unknown {
+  const lastKey = keys[keys.length - 1]
   return new Proxy(() => {}, {
-    get: (_target, prop) => {
-      prev[key] ??= {}
-      return s(prev[key], prop)
+    get(_target, prop) {
+      prev[lastKey] ??= isNaN(+prop.toString()) ? {} : []
+      return createInnerProxy(prev[lastKey], [...keys, prop])
     },
     apply(_target, _thisArg, argArray) {
-      prev[key] = argArray[0]
+      if (argArray[0] !== undefined) {
+        prev[lastKey] = argArray[0]
+      }
+      return keys
     },
   })
 }
