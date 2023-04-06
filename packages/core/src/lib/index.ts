@@ -5,60 +5,107 @@ import type { z } from 'zod'
 type InputEvent = Event & { currentTarget: EventTarget & HTMLInputElement }
 
 type CreateFormOptions<T> = {
-  initialData?: T,
+  initialData?: T | Promise<T>,
   schema?: z.ZodSchema<T>
 }
 
 type FieldError = {
+  node: HTMLElement
   path: (string | number)[]
   message: string
 }
 
 export function createForm<T>(options?: CreateFormOptions<T>) {
-  const data = writable<T>(options?.initialData)
+  let _initialData = options?.initialData ?? Object.create(null)
+
+  const data = writable<T>()
   const errors = writable<FieldError[]>([])
   const dirty = writable<Record<string, boolean>>({})
+
+  if (_initialData instanceof Promise) {
+    _initialData.then((awaitedInitialData) => {
+      data.set(awaitedInitialData)
+      _initialData = awaitedInitialData
+    })
+  }
+
+  const form = (node: HTMLElement) => {
+    const handleSubmit = (event: Event) => {
+      const currentErrors = get(errors)
+      if (currentErrors.length) {
+        event.preventDefault()
+        currentErrors[0].node.focus()
+        return
+      }
+    }
+
+    node.addEventListener('submit', handleSubmit)
+
+    return {
+      destroy() {
+        node.removeEventListener('submit', handleSubmit)
+      }
+    }
+  }
 
   /**
    * Svelte action to register a field.
    */
-  const field = (node: HTMLElement, proxyCallback: (t: T) => any) => {
+  const field = (node: HTMLElement, draftCallback: (t: T) => any) => {
     const inputNode = node as HTMLInputElement
 
     const handleChange = (event: Event) => {
       const e = event as InputEvent
 
       /**
-       * Mutate this data to update the current data.
+       * Copy of current form data store.
        */
-      const newData = (get(data) ?? {}) as T
+      const newData = get(data)
 
       /**
-       * Create a draft proxy around the original object.
+       * Create a draft proxy of the form data copy.
        */
       const draft = createDraftProxy(newData)
 
       /**
-       * The callback actually indexes the draft object; 
-       * invoking the function at that property will set the value in the original object.
+       * Pass the draft proxy to the callback;
+       * the callback does a nested index of the original object and sets any undefined properites.
+       *
+       * Then invoke the function with the current value of the input;
+       * this sets the value of the final accessed property, 
+       * then returns an array of keys to that property.
        */
-      const keys = proxyCallback(draft)(e.currentTarget.value)
+      const keys = draftCallback(draft)(e.currentTarget.value)
 
+      /**
+       * Use the array of keys to set the dirty flag for that property.
+       */
       dirty.update(current => ({ ...current, [keys.join('.')]: true }))
 
+      /**
+       * If no schema is provided, just set the data.
+       */
       if (!options?.schema) {
         return data.set(newData)
       }
 
+      /**
+       * If a schema is provided, validate the data.
+       */
       const parseResult = options.schema.safeParse(newData)
 
+      /**
+       * If the data is valid, set the data.
+       * Else filter the errors to only include errors for dirty fields.
+       */
       if (parseResult.success) {
         return data.set(parseResult.data)
       } 
       else {
-        errors.set(parseResult.error.errors.filter((e) => {
-          return Object.keys(dirty).includes(e.path.join('.'))
-        }))
+        const filteredErrors = parseResult.error.errors.filter((e) => {
+          return Object.keys(get(dirty)).includes(e.path.join('.'))
+        })
+        errors.set(filteredErrors.map(e => ({ ...e, node })))
       }
     }
 
@@ -79,17 +126,45 @@ export function createForm<T>(options?: CreateFormOptions<T>) {
   /**
    * Svelte action to register an error.
    */
-  const error = (node: HTMLElement, name: (t: T) => any) => {
+  const error = (node: HTMLElement, draftCallback: (t: T) => any) => {
     errors.subscribe(current => {
+      /**
+       * Get a copy of the errors store.
+       */
       const newErrors: any = current
+
+      /**
+       * Create a draft proxy of the errors store.
+       */
       const draft = createDraftProxy(newErrors)
-      const keys = name(draft)()
+
+      /**
+       * Pass the draft proxy to the callback;
+       * the callback does a nested index of the original object and sets any undefined properites.
+       *
+       * Then invoke the function with the current value of the input;
+       * this sets the value of the final accessed property, 
+       * then returns an array of keys to that property.
+       */
+      const keys = draftCallback(draft)()
+
+      /**
+       * Filter the errors to only include errors for the current field.
+       */
       const matchingErrors = current.filter(error => error.path.join('.').includes(keys.join('.')))
+
+      /**
+       * Set the innerHTML of the error node to the error message.
+       */
       node.innerHTML = matchingErrors.map(error => error.message).join('')
     })
   }
 
-  return { data, errors, field, error }
+  const actions = { form, field, error }
+
+  const stores = { dirty, data, errors }
+
+  return { ...actions, ...stores }
 }
 
 const noop = () => {}

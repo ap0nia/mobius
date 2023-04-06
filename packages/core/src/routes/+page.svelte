@@ -5,7 +5,7 @@
 
   const formData = scope({ username: { name: 'string' }, passwords: 'username[]' })
 
-  const { error, field } = createForm<typeof formData.infer>({
+  const { form, error, field } = createForm<typeof formData.infer>({
     schema: z.object({
       username: z.object({
         name: z.string()
@@ -20,7 +20,7 @@
   })
 </script>
 
-<form action="">
+<form action="" use:form>
   p0
   <input type="text" use:field={t => t.passwords[0].name}>
 
@@ -29,4 +29,7 @@
 
   e0
   <p use:error={t => t.passwords[0]}></p>
+  <div style="height: 100vh"></div>
+
+  <button>HI</button>
 </form>
