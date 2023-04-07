@@ -2,6 +2,9 @@
   import { z } from 'zod'
   import { scope } from "arktype"
   import { createForm } from '$lib'
+  import { writable, derived } from 'svelte/store';
+
+  import MyComponent from './MyComponent.svelte';
 
   const formData = scope({ username: { name: 'string' }, passwords: 'username[]' })
 
@@ -18,7 +21,18 @@
       )
     })
   })
+
+  let value = 69
+
+  function createProps() {
+    const increment = () => {
+      value = value + 1
+    }
+    return { value, increment }
+  }
 </script>
+
+<MyComponent {...createProps()} {value} />
 
 <form action="" use:form>
   p0

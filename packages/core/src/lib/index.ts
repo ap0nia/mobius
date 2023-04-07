@@ -188,8 +188,22 @@ function createInnerProxy(prev: any, keys: (string | symbol)[]): unknown {
     apply(_target, _thisArg, argArray) {
       if (argArray[0] !== undefined) {
         prev[lastKey] = argArray[0]
+        return keys
       }
-      return keys
+      return prev[lastKey]
     },
   })
 }
+
+const get = (obj: any, path: string, defaultValue: unknown = undefined) => {
+  const travel = (regexp: RegExp) =>
+    String.prototype.split
+      .call(path, regexp)
+      .filter(Boolean)
+      .reduce((res, key) => (res !== null && res !== undefined ? res[key] : res), obj);
+  const result = travel(/[,[\]]+?/) || travel(/[,[\].]+?/);
+  return result === undefined || result === obj ? defaultValue : result;
+};
+
+var object = { a: [{ b: { c: 3 } }] };
+var result = get(object, 'a[0].b.c', 1);
