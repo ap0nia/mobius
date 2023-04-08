@@ -3,11 +3,14 @@
   "type": "module",
   "scripts": {
     "prepare": "svelte-kit sync",
+    "format": "prettier --plugin-search-dir . --write src",
     "dev": "vite"
   },
   "devDependencies": {
     "@sveltejs/kit": "^1.15.1",
     "arktype": "1.0.10-alpha",
+    "prettier": "^2.8.7",
+    "prettier-plugin-svelte": "^2.10.0",
     "svelte": "^3.58.0",
     "typescript": "^5.0.3",
     "typescript-svelte-plugin": "^0.3.22",
